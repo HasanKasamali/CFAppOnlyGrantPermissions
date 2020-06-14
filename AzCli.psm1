@@ -136,6 +136,7 @@ function Set-DelegatePermissions {
         [string]
         $ParametersJsonFilePath   
     )
+    
 
     Get-Content -Raw -Path $ParametersJsonFilePath | ConvertFrom-Json | ForEach-Object {
         $APIPerms = $PSItem
@@ -143,6 +144,7 @@ function Set-DelegatePermissions {
         $permsNames = @()
        
         if (-not $APIPerms.DelegatePermissions) {
+            #ToDo: IF there is none, it needs to remove all ServicePrincipal permissions for this object.
             return
         }
 
@@ -271,7 +273,7 @@ function Remove-CurrentServicePrincipalGrants {
 
     $apiUrl = "https://graph.microsoft.com/v1.0/servicePrincipals/$ServicePrincipalObjectId/appRoleAssignments"
     
-    $appRoleAssignmentCollection = (Invoke-RestMethod -Uri $apiUrl -Headers @{Authorization = "Bearer $($tokenResponse.accessToken)" }  -Method GET -Body $($body | ConvertTo-Json) -ContentType "application/json" | ConvertTo-Json).value
+    $appRoleAssignmentCollection = @(Invoke-RestMethod -Uri $apiUrl -Headers @{Authorization = "Bearer $($tokenResponse.accessToken)" }  -Method GET -ContentType "application/json").value
     
     if($appRoleAssignmentCollection.Count -eq 0){return}
         

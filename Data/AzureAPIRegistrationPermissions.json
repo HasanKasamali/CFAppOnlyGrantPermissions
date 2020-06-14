@@ -2,7 +2,8 @@
     {
         "Name": "Windows Azure Active Directory",
         "ApplicationPermissions": [
-            "Application.ReadWrite.All"
+            "Application.ReadWrite.All",
+            "Directory.ReadWrite.All"
         ]
     },
     {
