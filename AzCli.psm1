@@ -17,7 +17,7 @@ $InformationPreference = $InformationOverride
 $VerbosePreference = $VerboseOverride
 
 
-function Get-APIPermissionsObject{
+function Get-APIPermissionsObject {
     param(
         [Parameter(Mandatory)]
         [string]
@@ -89,7 +89,7 @@ function Set-AppCredentials {
         [Parameter(Mandatory)]
         [string]
         $AppId,
-        [ValidateLength(0,16)]
+        [ValidateLength(0, 16)]
         [Parameter()]
         [string]
         $Description = "Registration",
@@ -99,12 +99,12 @@ function Set-AppCredentials {
     )
 
     Write-Information -MessageData:"Assigning Password to description '$Description'..."
-	if($SecureSecret)
-    {
+    if ($SecureSecret) {
         $secret = ConvertFrom-SecureString -SecureString:$SecureSecret -AsPlainText
-        $appCredentials = Invoke-AzCommand -Command:"az ad app credential reset --id $($appReg.appId) --credential-description '$Description' --password $secret --end-date 2299-12-31"
-    }else{
-        $appCredentials = Invoke-AzCommand -Command:"az ad app credential reset --id $($appReg.appId) --credential-description '$Description' --end-date 2299-12-31"
+        $appCredentials = Invoke-AzCommand -Command:"az ad app credential reset --id $AppId --credential-description '$Description' --password $secret --end-date 2299-12-31"
+    }
+    else {
+        $appCredentials = Invoke-AzCommand -Command:"az ad app credential reset --id $AppId --credential-description '$Description' --end-date 2299-12-31"
     }
   
     Write-Output $appCredentials
@@ -118,12 +118,168 @@ function Set-ServicePrincipalForAppId {
     )
 
     Write-Information -MessageData:"Checking if the Service Principal exists for the $AppId..."
-    $servicePrincipal = Invoke-AzCommand -Command:"az ad sp list --spn $($appReg.appId)"
+    $servicePrincipal = Invoke-AzCommand -Command:"az ad sp list --spn $AppId"
     if ($servicePrincipal.Length -eq 0) {
         Write-Information -MessageData:"Creating the Service Principal for the $AppId..."
-        $servicePrincipal = Invoke-AzCommand -Command:"az ad sp create --id $($appReg.appId)"
+        $servicePrincipal = Invoke-AzCommand -Command:"az ad sp create --id $AppId"
     }
 
     Write-Output $servicePrincipal
 }
 
+function Set-DelegatePermissions {
+    param(
+        [Parameter(Mandatory)]
+        [object]
+        $ServicePrincipal,
+        [Parameter(Mandatory)]
+        [string]
+        $ParametersJsonFilePath   
+    )
+
+    Get-Content -Raw -Path $ParametersJsonFilePath | ConvertFrom-Json | ForEach-Object {
+        $APIPerms = $PSItem
+        $apiUrl = "https://graph.microsoft.com/v1.0/oauth2Permissiongrants"
+        $permsNames = @()
+       
+        if (-not $APIPerms.DelegatePermissions) {
+            return
+        }
+
+        Write-Information -MessageData:"Getting Service Principal for '$($APIPerms.Name)'..."
+        $APIServicePrincipal = Invoke-AzCommand -Command:"az ad sp list --query ""[?appDisplayName=='$($APIPerms.Name)' || appId=='$($APIPerms.Name)']"" --all"
+
+        $APIPerms.DelegatePermissions | ForEach-Object {
+            $delegatePerms = $PSItem
+           
+            $delegatePermInfo = Invoke-AzCommand -Command:"az ad sp show --id $($APIServicePrincipal.appId) --query ""oauth2Permissions[?value=='$delegatePerms']"""
+            $permsNames += $delegatePermInfo.value
+
+            Write-Information -MessageData:"Setting the App Registration Permission '$($ServicePrincipal.appDisplayName)' with '$($delegatePermInfo.value)'..."
+            Invoke-AzCommand -Command:"az ad app permission add --id $($ServicePrincipal.appId) --api $($APIServicePrincipal.appId) --api-permissions $($delegatePermInfo.id)=Scope"
+        }
+
+        $existing = Invoke-AzCommand -Command:"az ad app permission list-grants --filter ""clientId eq '$($ServicePrincipal.objectId)' and consentType eq 'AllPrincipals' and resourceId eq '$($APIServicePrincipal.objectId)'"" " | Select-Object -First 1
+        
+        $tokenResponse = Invoke-AzCommand -Command:"az account get-access-token --resource-type ms-graph" 
+        
+        $method = "POST"
+        $uniquePerms = $permsNames | Sort-Object | Get-Unique
+        
+        $body = @{
+            clientId    = $($servicePrincipal.objectId)
+            consentType = "AllPrincipals"
+            principalId = $null
+            resourceId  = $($APIServicePrincipal.objectId)
+            scope       = $($uniquePerms -join " ")
+            startTime   = "0001-01-01T00:00:00Z"
+            expiryTime  = "2299-12-31T00:00:00Z"
+        }
+
+        if($existing){
+            $method = "PATCH"
+            #Please note app permissions cannot delete, only a user can do that. Workaround patch with no perms.
+            Write-Information "Updating existing delegate grants..."
+          
+            $apiUrl += "/$($existing.objectId)"
+            $body = @{
+			    scope = $($uniquePerms -join " ")
+		    } 
+         }
+         
+        Invoke-RestMethod -Uri $apiUrl -Headers @{Authorization = "Bearer $($tokenResponse.accessToken)" }  -Method $method -Body $($body | ConvertTo-Json) -ContentType "application/json" | ConvertTo-Json
+
+    }
+}
+
+function Set-ApplicationPermissions {
+    param(
+        [Parameter(Mandatory)]
+        [object]
+        $ServicePrincipal,
+        [Parameter(Mandatory)]
+        [string]
+        $ParametersJsonFilePath   
+    )
+ 
+    Remove-CurrentServicePrincipalGrants -ServicePrincipalObjectId:$ServicePrincipal.objectId
+
+    Get-Content -Raw -Path $ParametersJsonFilePath | ConvertFrom-Json | ForEach-Object {
+        $APIPerms = $PSItem
+        $apiUrl = "https://graph.microsoft.com/v1.0/servicePrincipals"
+             
+        if (-not $APIPerms.ApplicationPermissions) {
+            return
+        }
+
+        $tokenResponse = Invoke-AzCommand -Command:"az account get-access-token --resource-type ms-graph" 
+
+        Write-Information -MessageData:"Getting Service Principal for $($APIPerms.Name)..."
+        $APIServicePrincipal = Invoke-AzCommand -Command:"az ad sp list --query ""[?appDisplayName=='$($APIPerms.Name)' || appId=='$($APIPerms.Name)']"" --all"
+
+        $APIPerms.ApplicationPermissions | ForEach-Object {
+            $appPerms = $PSItem
+           
+            $appPermInfo = Invoke-AzCommand -Command:"az ad sp show --id $($APIServicePrincipal.appId) --query ""appRoles[?value=='$appPerms']"""
+            
+            Write-Information -MessageData:"Setting the App Registration Permission '$($ServicePrincipal.appDisplayName)' with '$($appPermInfo.value)'..."
+            Invoke-AzCommand -Command:"az ad app permission add --id $($ServicePrincipal.appId) --api $($APIServicePrincipal.appId) --api-permissions $($appPermInfo.id)=Role"
+
+            $body = @{
+                principalId = $ServicePrincipal.objectId
+                resourceId  = $APIServicePrincipal.objectId
+                appRoleId   = $appPermInfo.id
+            }
+
+            $appRoleAssignmentUrl = "$apiUrl/$($ServicePrincipal.objectId)/appRoleAssignments"
+           
+            Invoke-RestMethod -Uri $appRoleAssignmentUrl -Headers @{Authorization = "Bearer $($tokenResponse.accessToken)" }  -Method POST -Body $($body | ConvertTo-Json) -ContentType "application/json" | ConvertTo-Json
+        }
+    }
+}
+
+function Remove-CurrentAppPermissions {
+    param(
+        [Parameter(Mandatory)]
+        [string]
+        $AppId
+    )
+    
+    Write-Information -MessageData: "Getting existing permissions for AppID $AppId..."
+    $currentPermissionCollection = @(Invoke-AzCommand -Command:"az ad app permission list --id $AppId")
+    
+    Write-Information -MessageData:"Removing all existing app permissions..."
+    $currentPermissionCollection | ForEach-Object {
+        $permission = $PSItem
+        if($null -ne $permission.resourceAppId){ 
+        Invoke-AzCommand -Command:"az ad app permission delete --id $AppId --api $($permission.resourceAppId)"
+        }
+    }
+
+}
+
+function Remove-CurrentServicePrincipalGrants {
+ 
+    param(
+        [Parameter(Mandatory)]
+        [string]
+        $ServicePrincipalObjectId
+    )
+    
+    $tokenResponse = Invoke-AzCommand -Command:"az account get-access-token --resource-type ms-graph" 
+    Write-Information -MessageData:"Getting all existing Service Principal Grants for $ServicePrincipalObjectId..."
+
+    $apiUrl = "https://graph.microsoft.com/v1.0/servicePrincipals/$ServicePrincipalObjectId/appRoleAssignments"
+    
+    $appRoleAssignmentCollection = (Invoke-RestMethod -Uri $apiUrl -Headers @{Authorization = "Bearer $($tokenResponse.accessToken)" }  -Method GET -Body $($body | ConvertTo-Json) -ContentType "application/json" | ConvertTo-Json).value
+    
+    if($appRoleAssignmentCollection.Count -eq 0){return}
+        
+    $appRoleAssignmentCollection | Foreach-Object {
+        $appRoleAssignment = $PSItem
+
+        Write-Information -MessageData:"Removing $servicePrincipalObjectID grant for appRoleId:$($appRoleAssignment.appRoleId) for resource:$($appRoleAssignment.resourceDisplayName)"
+        $deleteApiUrl = "$apiUrl/$($appRoleAssignment.id)"
+        Invoke-RestMethod -Uri $deleteApiUrl -Headers @{Authorization = "bearer $($tokenResponse.accessToken)"} -Method Delete -ContentType "application/json"
+    }
+}
