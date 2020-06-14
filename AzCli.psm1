@@ -37,7 +37,6 @@ function Get-APIPermissionsObject{
 
     Write-Output $obj
 }
-
 function Invoke-AzCommand {
     param(
         # The command to execute
@@ -70,3 +69,61 @@ function Invoke-AzCommand {
         }
     }
 }
+
+function  Set-AppRegistration {
+    param(
+        # The command to execute
+        [Parameter(Mandatory)]
+        [string]
+        $ApplicationName
+    )
+
+    Write-Information -MessageData:"Creating/Updating the $ApplicationName App Registration..."
+    $appReg = Invoke-AzCommand -Command:"az ad app create --display-name '$ApplicationName'"
+
+    Write-Output $appReg
+}
+
+function Set-AppCredentials {
+    param(
+        [Parameter(Mandatory)]
+        [string]
+        $AppId,
+        [ValidateLength(0,16)]
+        [Parameter()]
+        [string]
+        $Description = "Registration",
+        [Parameter()]
+        [securestring]
+        $SecureSecret
+    )
+
+    Write-Information -MessageData:"Assigning Password to description '$Description'..."
+	if($SecureSecret)
+    {
+        $secret = ConvertFrom-SecureString -SecureString:$SecureSecret -AsPlainText
+        $appCredentials = Invoke-AzCommand -Command:"az ad app credential reset --id $($appReg.appId) --credential-description '$Description' --password $secret --end-date 2299-12-31"
+    }else{
+        $appCredentials = Invoke-AzCommand -Command:"az ad app credential reset --id $($appReg.appId) --credential-description '$Description' --end-date 2299-12-31"
+    }
+  
+    Write-Output $appCredentials
+}
+
+function Set-ServicePrincipalForAppId {
+    param(
+        [Parameter(Mandatory)]
+        [string]
+        $AppId
+    )
+
+    Write-Information -MessageData:"Checking if the Service Principal exists for the $AppId..."
+    $servicePrincipal = Invoke-AzCommand -Command:"az ad sp list --spn $($appReg.appId)"
+    if ($servicePrincipal.Length -eq 0) {
+        Write-Information -MessageData:"Creating the Service Principal for the $AppId..."
+        $servicePrincipal = Invoke-AzCommand -Command:"az ad sp create --id $($appReg.appId)"
+    }
+
+    Write-Output $servicePrincipal
+}
+

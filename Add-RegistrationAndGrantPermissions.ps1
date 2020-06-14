@@ -1,149 +1,116 @@
+#https://winsmarts.com/how-to-grant-admin-consent-to-an-api-programmatically-e32f4a100e9d
 
-$perms = @(
-    @{
-        Name = "Microsoft Graph"
-        DelegatePermissions = @("User.Read")
-        ApplicationPermissions = @("Directory.Read.All","Sites.Read.All")
-    },
-    @{
-        Name = "Windows Azure Active Directory"
-        DelegatePermissions = @("User.Read","Group.Read.All")
-        Application = @("Directory.Read.All")
-    }
-    @{
-        Name = "Office 365 SharePoint Online"
-        DelegatePermissions = @()
-        Application = @("Sites.FullControl.All", "TermStore.Read.All", "User.Read.All")
-    }
-)
+#https://graph.microsoft.com/beta/serviceprincipals/<servicePrincipalID>/appRoleAssignments
+#https://graph.microsoft.com/beta/serviceprincipals/<servicePrincipalID>/appRoleAssignedTo
+
+#https://docs.microsoft.com/en-us/graph/api/serviceprincipal-post-approleassignments?view=graph-rest-1.0&tabs=http
 
 
 [CmdletBinding()]
 param (
-    [Parameter()]
-    [string]
-    $ApplicationName,
-    [Parameter]
-    [object]
-    $Parameters
+	[Parameter(Mandatory)]
+	[string]
+	$ApplicationName,
+	[Parameter(Mandatory)]
+	[string]
+	$ParametersJsonFilePath,
+	[Parameter()]
+	[bool]
+	$resetPassword = $true
 )
 
 $ErrorActionPreference = 'Stop'
 $InformationPreference = 'Continue'
 
 Import-Module -Name:"$PSScriptRoot\AzCli" -Force -ArgumentList:@(
-    $ErrorActionPreference,
-    $InformationPreference,
-    $VerbosePreference
+	$ErrorActionPreference,
+	$InformationPreference,
+	$VerbosePreference
 )
 
-Write-Information -MessageData:"Creating the $ApplicationName App Registration..."
-$AppReg = Invoke-AzCommand -Command:"az ad app create --display-name '$ApplicationName'"
-$Credentials = Invoke-AzCommand -Command:"az ad app credential reset --id $($AppReg.appId) --credential-description 'Registration' --end-date 2299-12-31"
+$appReg = Set-AppRegistration -ApplicationName:$ApplicationName
 
-Write-Information -MessageData:"Checking if the Service Principal exists for the $ApplicationName App Registration..."
-$ServicePrincipalList = az ad sp list --spn $($AppRegistration.appId) | ConvertFrom-Json
-if ($ServicePrincipalList.Length -eq 0) {
-    Write-Information -MessageData:"Creating the Service Principal for the $ApplicationName App Registration"
-    $ServicePrincipal = Invoke-AzCommand -Command:"az ad sp create --id $($AppReg.appId)"
+if($resetPassword){
+	Set-AppCredentials -AppId:$appReg.Id
 }
 
-
-#Permissions
-$Name = "Microsoft Graph"
-$graph = az ad sp list --query "[?appDisplayName=='Microsoft Graph']" --all | ConvertFrom-Json
-#Application Permission
-$appGroupReadAll = az ad sp show --id $graph.appId --query "oauth2Permissions[?value=='Group.Read.All']" | ConvertFrom-Json
-#User Permission
-$userGroupReadAll = az ad sp show --id $graph.appId --query "appRoles[?value=='Group.Read.All']" | ConvertFrom-Json
-
-#Example working.
-$Tokenresponse = az account get-access-token --resource-type ms-graph | ConvertFrom-Json
-
-$AppRegistration = az ad app create --display-name 'Paul Demo' | ConvertFrom-Json
-    
-$ServicePrincipalList = az ad sp list --spn $($AppRegistration.appId) | ConvertFrom-Json
-if ($ServicePrincipalList.Length -eq 0) {
-    az ad sp create --id $($AppRegistration.appId)
-}
-
-$GraphServicePrincipal =  az ad sp list --filter "appId eq '00000002-0000-0000-c000-000000000000'" | ConvertFrom-Json
-
-$directoryReadAll = $GraphServicePrincipal.oauth2Permissions | Where-Object { $_.value -eq "Directory.Read.All" } 
-az ad app permission add --id "$($AppRegistration.AppId)" --api "$($GraphServicePrincipal.appId)" --api-permissions "$($directoryReadAll.id)=Scope"
-
-$AppServicePrincipal = az ad sp list --filter "appId eq '$($AppRegistration.appId)'" | ConvertFrom-Json
+$servicePrincipal = Set-ServicePrincipalForAppId -AppId:$appReg.Id
 
 
-$body = @{
-    clientId    = $($AppServicePrincipal.objectId)
-    consentType = "AllPrincipals"
-    principalId = $null
-    resourceId  = $($GraphServicePrincipal.objectId)
-    scope       = "Directory.Read.All"
-    startTime   = "2019-10-19T10:37:00Z"
-    expiryTime  = "2019-10-19T10:37:00Z"
-}
 
-$apiUrl = "https://graph.microsoft.com/beta/oauth2PermissionGrants"
+$jsondata = Get-Content -Raw -Path $ParametersJsonFilePath | ConvertFrom-Json
+$jsonData | ForEach-Object {
+	$apiUrl = "https://graph.microsoft.com/beta/oauth2PermissionGrants"
+	$permsNames = @()
+	$Tokenresponse = Invoke-AzCommand -Command:"az account get-access-token --resource-type ms-graph" 
+	$APIPerms = $PSItem
 
-$output = Invoke-RestMethod -Uri $apiUrl -Headers @{Authorization = "Bearer $($Tokenresponse.accessToken)" }  -Method POST -Body $($body | ConvertTo-Json) -ContentType "application/json" | ConvertTo-Json
-<# 
-"requiredResourceAccess": [
-		{
-            "Microsoft Graph"
-			"resourceAppId": "00000003-0000-0000-c000-000000000000",
+	$APIServicePrincipal = Invoke-AzCommand -Command:"az ad sp list --query ""[?appDisplayName=='$($APIPerms.Name)' || appId=='$($APIPerms.Name)']"" --all"
+	Write-Information -MessageData: "Getting existing permissions first for AppID $($appReg.AppId)..."
+	$currentPermissions - @(Invoke-AzCommand -Command:"az ad app permission list --id $($appReg.AppId)")
+
+	if ($APIPerms.ApplicationPermissions) {
+		$APIPerms.ApplicationPermissions | ForEach-Object {
+			$appPerms = $PSItem 
+			$appPermInfo = Invoke-AzCommand -Command:"az ad sp show --id $($APIServicePrincipal.appId) --query ""appRoles[?value=='$appPerms']"""
+
+			$permsNames += $appPermInfo.value
+
+			$existingPermissions = $currentPermissions | Where-Object { $PSItem.resourceAppId -eq $APIServicePrincipal.appId } |
+			Select-Object -ExpandProperty "resourceAccess" |
+			Where-Object { $PSItem.id -eq $appPermInfo.id }
 			
-		},
-		{
-            "Windows Azure Active Directory"
-			"resourceAppId": "00000002-0000-0000-c000-000000000000",
-			"resourceAccess": [
-				{
-					"id": "1cda74f2-2616-4834-b122-5cb1b07f8a59",
-					"type": "Role"
-				}
-			]
-		},
-		{
-            "Office 365 SharePoint Online"
-			"resourceAppId": "00000003-0000-0ff1-ce00-000000000000",
-			"resourceAccess": [
-				{
-					"id": "678536fe-1083-478a-9c59-b99265e6b0d3",
-					"type": "Role"
-				}
-			]
-		},
-		{
-            "Office 365 Management APIs"
-			"resourceAppId": "c5393580-f805-4401-95e8-94b7a6ef2fc2",
-			"resourceAccess": [
-				{
-					"id": "594c1fb6-4f81-4475-ae41-0c394909246c",
-					"type": "Role"
-				}
-			]
-		},
-		{
-            "Common Data Service" #Dyanmics
-			"resourceAppId": "00000007-0000-0000-c000-000000000000",
-			"resourceAccess": [
-				{
-					"id": "78ce3f0f-a1ce-49c2-8cde-64b5c0896db4",
-					"type": "Scope"
-				}
-			]
-		},
-		{
-            "Power BI Service"
-			"resourceAppId": "00000009-0000-0000-c000-000000000000",
-			"resourceAccess": [
-				{
-					"id": "654b31ae-d941-4e22-8798-7add8fdf049f",
-					"type": "Role"
-				}
-			]
-		},
+			if (-not $existingPermissions) {
+				Invoke-AzCommand -Command:"az ad app permission add --id $($appReg.AppId) --api $($APIServicePrincipal.appId) --api-permissions $($appPermInfo.id)=Role"
+			}
+		}
+	}
+
+	if ($APIPerms.DelegatePermissions) {
+		$APIPerms.DelegatePermissions | ForEach-Object {
+			$delegatePerms = $PSItem
+			$delegatePermInfo = Invoke-AzCommand -Command:"az ad sp show --id $($APIInfo.appId) --query ""oauth2Permissions[?value=='$delegatePerms']"""
 		
-	], #>
+			$permsNames += $delegatePermInfo.value
+
+			$existingPermissions = $currentPermissions | Where-Object { $PSItem.resourceAppId -eq $APIServicePrincipal.appId } |
+			Select-Object -ExpandProperty "resourceAccess" |
+			Where-Object { $PSItem.id -eq $appPermInfo.id }
+			
+			if (-not $existingPermissions) {
+				Invoke-AzCommand -Command:"az ad app permission add --id $($appReg.AppId) --api $($APIServicePrincipal.appId) --api-permissions $($delegatePermInfo.id)=Scope"
+			}
+		}
+	}
+
+	$uniquePerms = $permsNames | Sort-Object | Get-Unique
+
+	$method = "POST"
+	
+	$body = @{
+		clientId    = $($servicePrincipal.objectId)
+		consentType = "AllPrincipals"
+		principalId = $null
+		resourceId  = $($APIServicePrincipal.objectId)
+		scope       = $($uniquePerms -join " ")
+		startTime   = "0001-01-01T00:00:00Z"
+		expiryTime  = "2299-12-31T00:00:00Z"
+	}
+
+	$existing = Invoke-AzCommand -Command:"az ad app permission list-grants --filter ""clientId eq '$($servicePrincipal.objectId)' and consentType eq 'AllPrincipals' and resourceId eq '$($APIServicePrincipal.objectId)'"" " | Select-Object -First 1
+
+	if ($existing) {
+		$method = "PATCH"
+		$uniquePerms += $existing.scope -split " "
+		$uniquePerms = $uniquePerms | Sort-Object | Get-Unique
+		
+		$apiUrl += "/$($existing.objectId)"
+		$body = @{
+			scope = $($uniquePerms -join " ")
+		}
+	}
+	
+	Invoke-RestMethod -Uri $apiUrl -Headers @{Authorization = "Bearer $($Tokenresponse.accessToken)" }  -Method POST -Body $($body | ConvertTo-Json) -ContentType "application/json" | ConvertTo-Json
+}
+
+$appCredentials

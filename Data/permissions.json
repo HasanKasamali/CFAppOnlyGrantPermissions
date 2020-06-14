@@ -1,0 +1,9 @@
+[
+    {
+        "Name": "Microsoft Graph",
+        "ApplicationPermissions": [
+            "Directory.Read.All",
+            "Sites.Read.All"
+        ]
+    }
+]

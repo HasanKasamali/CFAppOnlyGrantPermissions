@@ -1,0 +1,15 @@
+[
+    {
+        "Name": "Windows Azure Active Directory",
+        "ApplicationPermissions": [
+            "Application.ReadWirte.All"
+        ]
+    },
+    {
+        "Name": "Microsoft Graph",
+        "ApplicationPermissions": [
+            "AppRoleAssignment.ReadWrite.All",
+            "Directory.ReadWrite.All"
+        ]
+    }
+]

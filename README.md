@@ -19,7 +19,10 @@ The Azure CLI is used in preference to the PowerShell Az library as it is more i
         - Azure Active Directory Graph
             - Application Permissions
                 - Application.ReadWrite.All
-                - Add permissions
+        - Microsoft Graph
+            - Application Permissions
+                - AppRoleAssignment.ReadWrite.All
+                - Directory.ReadWrite.All
     - Grant Admin consent for tenant
 - Click Certificates & secrets
     - New client secret
