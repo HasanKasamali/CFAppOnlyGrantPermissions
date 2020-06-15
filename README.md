@@ -4,7 +4,7 @@ Using an Application Registration to Create, Apply Permissions, and Grant Permis
 ## Getting Started
 The Azure CLI is used in preference to the PowerShell Az library as it is more idempotent and has better coverage.
 
-## (Automated) Steps to Create the First Application Registration
+## (Automated) Steps to Create the First Application Registration the will Create, Apply and Grant others.
 This is the initial setup to create a Application Registration, with the required permissions. This has to be created with an account that can actually grant permissions. (e.g., Application / Global Administrator)
 - Ensure Azure CLI is installed. https://docs.microsoft.com/en-us/cli/azure/install-azure-cli?view=azure-cli-latest
 - Log into AZ Cli (remove --allow-no-subscriptions if you ahve access to a subscription)
@@ -17,7 +17,7 @@ az login --allow-no-subscriptions
 ```
 - You will receive a appId, tenant, and Password. Take note of these values.
 
-## (Manual) Steps to Create the first App Registration
+## (Manual) Steps to Create the First Application Registration the will Create, Apply and Grant others.
 - Open https://portal.azure.com
 - Go to App Registrations
 - Click New Registration
@@ -50,9 +50,9 @@ az login --allow-no-subscriptions
 - Create a login.ps1 file inside
 - Add the following script and replace values with your values of the "Azure API Registration"
 ```ps
-$tenant = "<TenantId>"
-$appId = "<appId>"
-$secret = "<secret>"
+$tenant = "[TenantId]"
+$appId = "[appId]"
+$secret = "[secret]"
 
 az login --service-principal --tenant $tenant --username $appId --password $secret --allow-no-subscriptions
 ```
@@ -98,7 +98,11 @@ You should now be logged in as the Azure API Registration. This account is now s
 ### Run the script to create a new App Registration
 - Run the following script
 ```ps
-$ApplicationName = "<NameOfYourChoice>"
-$PermissionsFile = ".\Data\<YourParameterFile>.json"
+$ApplicationName = "[NameOfYourChoice]"
+$PermissionsFile = ".\Data\[YourParameterFile].json"
 .\Add-RegistrationAndGrantPermissions.ps1 -ApplicationName:$ApplicationName -ParametersJsonFilePath:$PermissionsFile
 ```
+
+#TODO:
+When I have time there will be a blog post at this site:
+https://cann0nf0dder.wordpress.com
