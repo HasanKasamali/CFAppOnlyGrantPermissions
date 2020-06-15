@@ -16,6 +16,8 @@ $ErrorActionPreference = $ErrorActionOverride
 $InformationPreference = $InformationOverride
 $VerbosePreference = $VerboseOverride
 
+$oauth2PermissionGrantsApiUrl = "https://graph.microsoft.com/v1.0/oauth2Permissiongrants"
+$servicePrincipalsApiUrl = "https://graph.microsoft.com/v1.0/servicePrincipals"
 
 function Get-APIPermissionsObject {
     param(
@@ -69,7 +71,6 @@ function Invoke-AzCommand {
         }
     }
 }
-
 function  Set-AppRegistration {
     param(
         # The command to execute
@@ -83,7 +84,6 @@ function  Set-AppRegistration {
 
     Write-Output $appReg
 }
-
 function Set-AppCredentials {
     param(
         [Parameter(Mandatory)]
@@ -109,7 +109,6 @@ function Set-AppCredentials {
   
     Write-Output $appCredentials
 }
-
 function Set-ServicePrincipalForAppId {
     param(
         [Parameter(Mandatory)]
@@ -126,7 +125,6 @@ function Set-ServicePrincipalForAppId {
 
     Write-Output $servicePrincipal
 }
-
 function Set-DelegatePermissions {
     param(
         [Parameter(Mandatory)]
@@ -137,19 +135,18 @@ function Set-DelegatePermissions {
         $ParametersJsonFilePath   
     )
     
+    Remove-CurrentOauth2PermissionGrants -ServicePrincipalObjectId:$($ServicePrincipal.objectId)
 
     Get-Content -Raw -Path $ParametersJsonFilePath | ConvertFrom-Json | ForEach-Object {
         $APIPerms = $PSItem
-        $apiUrl = "https://graph.microsoft.com/v1.0/oauth2Permissiongrants"
         $permsNames = @()
        
         if (-not $APIPerms.DelegatePermissions) {
-            #ToDo: IF there is none, it needs to remove all ServicePrincipal permissions for this object.
             return
         }
 
         Write-Information -MessageData:"Getting Service Principal for '$($APIPerms.Name)'..."
-        $APIServicePrincipal = Invoke-AzCommand -Command:"az ad sp list --query ""[?appDisplayName=='$($APIPerms.Name)' || appId=='$($APIPerms.Name)']"" --all"
+        $APIServicePrincipal = Invoke-AzCommand -Command:"az ad sp list --query ""[?appDisplayName=='$($APIPerms.Name)' || appId=='$($APIPerms.Name)'].{appId:appId,objectId:objectId}"" --all"
 
         $APIPerms.DelegatePermissions | ForEach-Object {
             $delegatePerms = $PSItem
@@ -167,7 +164,7 @@ function Set-DelegatePermissions {
         
         $method = "POST"
         $uniquePerms = $permsNames | Sort-Object | Get-Unique
-        
+        $apiUrl = $oauth2PermissionGrantsApiUrl
         $body = @{
             clientId    = $($servicePrincipal.objectId)
             consentType = "AllPrincipals"
@@ -178,22 +175,21 @@ function Set-DelegatePermissions {
             expiryTime  = "2299-12-31T00:00:00Z"
         }
 
-        if($existing){
+        if ($existing) {
             $method = "PATCH"
             #Please note app permissions cannot delete, only a user can do that. Workaround patch with no perms.
             Write-Information "Updating existing delegate grants..."
           
             $apiUrl += "/$($existing.objectId)"
             $body = @{
-			    scope = $($uniquePerms -join " ")
-		    } 
-         }
+                scope = $($uniquePerms -join " ")
+            } 
+        }
          
-        Invoke-RestMethod -Uri $apiUrl -Headers @{Authorization = "Bearer $($tokenResponse.accessToken)" }  -Method $method -Body $($body | ConvertTo-Json) -ContentType "application/json" | ConvertTo-Json
+        Invoke-RestMethod -Uri $apiUrl -Headers @{Authorization = "Bearer $($tokenResponse.accessToken)" }  -Method $method -Body $($body | ConvertTo-Json) -ContentType "application/json"
 
     }
 }
-
 function Set-ApplicationPermissions {
     param(
         [Parameter(Mandatory)]
@@ -208,8 +204,7 @@ function Set-ApplicationPermissions {
 
     Get-Content -Raw -Path $ParametersJsonFilePath | ConvertFrom-Json | ForEach-Object {
         $APIPerms = $PSItem
-        $apiUrl = "https://graph.microsoft.com/v1.0/servicePrincipals"
-             
+                
         if (-not $APIPerms.ApplicationPermissions) {
             return
         }
@@ -217,7 +212,7 @@ function Set-ApplicationPermissions {
         $tokenResponse = Invoke-AzCommand -Command:"az account get-access-token --resource-type ms-graph" 
 
         Write-Information -MessageData:"Getting Service Principal for $($APIPerms.Name)..."
-        $APIServicePrincipal = Invoke-AzCommand -Command:"az ad sp list --query ""[?appDisplayName=='$($APIPerms.Name)' || appId=='$($APIPerms.Name)']"" --all"
+        $APIServicePrincipal = Invoke-AzCommand -Command:"az ad sp list --query ""[?appDisplayName=='$($APIPerms.Name)' || appId=='$($APIPerms.Name)'].{appId:appId,objectId:objectId}"" --all"
 
         $APIPerms.ApplicationPermissions | ForEach-Object {
             $appPerms = $PSItem
@@ -233,13 +228,12 @@ function Set-ApplicationPermissions {
                 appRoleId   = $appPermInfo.id
             }
 
-            $appRoleAssignmentUrl = "$apiUrl/$($ServicePrincipal.objectId)/appRoleAssignments"
+            $appRoleAssignmentUrl = "$servicePrincipalsApiUrl/$($ServicePrincipal.objectId)/appRoleAssignments"
            
             Invoke-RestMethod -Uri $appRoleAssignmentUrl -Headers @{Authorization = "Bearer $($tokenResponse.accessToken)" }  -Method POST -Body $($body | ConvertTo-Json) -ContentType "application/json" | ConvertTo-Json
         }
     }
 }
-
 function Remove-CurrentAppPermissions {
     param(
         [Parameter(Mandatory)]
@@ -253,15 +247,13 @@ function Remove-CurrentAppPermissions {
     Write-Information -MessageData:"Removing all existing app permissions..."
     $currentPermissionCollection | ForEach-Object {
         $permission = $PSItem
-        if($null -ne $permission.resourceAppId){ 
-        Invoke-AzCommand -Command:"az ad app permission delete --id $AppId --api $($permission.resourceAppId)"
+        $permission.resourceAppId | ForEach-Object{
+            $resourceAppId = $PSItem
+            Invoke-AzCommand -Command:"az ad app permission delete --id $AppId --api $resourceAppId"     
         }
     }
-
 }
-
 function Remove-CurrentServicePrincipalGrants {
- 
     param(
         [Parameter(Mandatory)]
         [string]
@@ -271,17 +263,39 @@ function Remove-CurrentServicePrincipalGrants {
     $tokenResponse = Invoke-AzCommand -Command:"az account get-access-token --resource-type ms-graph" 
     Write-Information -MessageData:"Getting all existing Service Principal Grants for $ServicePrincipalObjectId..."
 
-    $apiUrl = "https://graph.microsoft.com/v1.0/servicePrincipals/$ServicePrincipalObjectId/appRoleAssignments"
+    $apiUrl = "$servicePrincipalsApiUrl/$ServicePrincipalObjectId/appRoleAssignments"
     
     $appRoleAssignmentCollection = @(Invoke-RestMethod -Uri $apiUrl -Headers @{Authorization = "Bearer $($tokenResponse.accessToken)" }  -Method GET -ContentType "application/json").value
     
-    if($appRoleAssignmentCollection.Count -eq 0){return}
+    if ($appRoleAssignmentCollection.Count -eq 0) { return }
         
-    $appRoleAssignmentCollection | Foreach-Object {
+    $appRoleAssignmentCollection | ForEach-Object {
         $appRoleAssignment = $PSItem
 
         Write-Information -MessageData:"Removing $servicePrincipalObjectID grant for appRoleId:$($appRoleAssignment.appRoleId) for resource:$($appRoleAssignment.resourceDisplayName)"
         $deleteApiUrl = "$apiUrl/$($appRoleAssignment.id)"
-        Invoke-RestMethod -Uri $deleteApiUrl -Headers @{Authorization = "bearer $($tokenResponse.accessToken)"} -Method Delete -ContentType "application/json"
+        Invoke-RestMethod -Uri $deleteApiUrl -Headers @{Authorization = "bearer $($tokenResponse.accessToken)" } -Method Delete -ContentType "application/json"
+    }
+}
+function Remove-CurrentOauth2PermissionGrants {
+    param(
+        [Parameter(Mandatory)]
+        [string]
+        $ServicePrincipalObjectId
+    )
+   
+    $tokenResponse = Invoke-AzCommand -Command:"az account get-access-token --resource-type ms-graph" 
+    $existingCollection = Invoke-AzCommand -Command:"az ad app permission list-grants --filter ""clientId eq '$($ServicePrincipalObjectId)' and consentType eq 'AllPrincipals'"" "
+
+    $existingCollection | ForEach-Object {
+        $existing = $PSItem
+
+        Write-Information -MessageData:"Removing existing access for resourceId:$($existing.resourceId)"
+        $apiUrlPatch = "$oauth2PermissionGrantsApiUrl/$($existing.objectId)"
+        $body = @{
+            scope = ""
+        }
+
+        Invoke-RestMethod -Uri $apiUrlPatch -Headers @{Authorization = "Bearer $($tokenResponse.accessToken)" }  -Method PATCH -Body $($body | ConvertTo-Json) -ContentType "application/json"
     }
 }

@@ -4,6 +4,9 @@
         "ApplicationPermissions": [
             "Directory.Read.All",
             "Sites.Read.All"
+        ],
+        "DelegatePermissions": [
+            "User.Read"
         ]
      }
 ]
