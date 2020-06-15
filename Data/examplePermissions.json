@@ -14,14 +14,10 @@
         "DelegatePermissions": [
             "User.Read",
             "Group.Read.All"
-        ],
-        "ApplicationPermissions": [
-            "Directory.Read.All"
         ]
     },
     {
         "Name": "Office 365 SharePoint Online",
-        "DelegatePermissions": [],
         "ApplicationPermissions": [
             "Sites.FullControl.All",
             "TermStore.Read.All",

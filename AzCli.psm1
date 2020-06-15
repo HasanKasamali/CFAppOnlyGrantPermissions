@@ -136,8 +136,8 @@ function Set-DelegatePermissions {
     )
     
     Remove-CurrentOauth2PermissionGrants -ServicePrincipalObjectId:$($ServicePrincipal.objectId)
-
-    Get-Content -Raw -Path $ParametersJsonFilePath | ConvertFrom-Json | ForEach-Object {
+    $permissionFile = Get-Content -Raw -Path $ParametersJsonFilePath | ConvertFrom-Json
+    $permissionFile | ForEach-Object {
         $APIPerms = $PSItem
         $permsNames = @()
        
@@ -202,8 +202,9 @@ function Set-ApplicationPermissions {
  
     Remove-CurrentServicePrincipalGrants -ServicePrincipalObjectId:$ServicePrincipal.objectId
 
-    Get-Content -Raw -Path $ParametersJsonFilePath | ConvertFrom-Json | ForEach-Object {
-        $APIPerms = $PSItem
+     $permissionFile = Get-Content -Raw -Path $ParametersJsonFilePath | ConvertFrom-Json
+     $permissionFile | ForEach-Object {
+           $APIPerms = $PSItem
                 
         if (-not $APIPerms.ApplicationPermissions) {
             return
@@ -247,6 +248,7 @@ function Remove-CurrentAppPermissions {
     Write-Information -MessageData:"Removing all existing app permissions..."
     $currentPermissionCollection | ForEach-Object {
         $permission = $PSItem
+        if ($permission.Count -eq 0) { return }
         $permission.resourceAppId | ForEach-Object{
             $resourceAppId = $PSItem
             Invoke-AzCommand -Command:"az ad app permission delete --id $AppId --api $resourceAppId"     
