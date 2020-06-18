@@ -1,8 +1,4 @@
-#https://winsmarts.com/how-to-grant-admin-consent-to-an-api-programmatically-e32f4a100e9d
-
-#https://graph.microsoft.com/beta/serviceprincipals/<servicePrincipalID>/appRoleAssignments
-#https://graph.microsoft.com/beta/serviceprincipals/<servicePrincipalID>/appRoleAssignedTo
-
+#https://graph.microsoft.com/v1.0/serviceprincipals/<servicePrincipalID>/appRoleAssignments
 #https://docs.microsoft.com/en-us/graph/api/serviceprincipal-post-approleassignments?view=graph-rest-1.0&tabs=http
 
 

@@ -35,7 +35,6 @@ az login --allow-no-subscriptions
         - Microsoft Graph
             - Application Permissions
                 - AppRoleAssignment.ReadWrite.All
-                - Directory.ReadWrite.All
     - Grant Admin consent for tenant
 - Click Certificates & secrets
     - New client secret

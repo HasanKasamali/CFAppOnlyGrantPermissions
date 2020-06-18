@@ -9,8 +9,7 @@
     {
         "Name": "Microsoft Graph",
         "ApplicationPermissions": [
-            "AppRoleAssignment.ReadWrite.All",
-            "Directory.ReadWrite.All"
+            "AppRoleAssignment.ReadWrite.All"
         ]
     }
 ]
